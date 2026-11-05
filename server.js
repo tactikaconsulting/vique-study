@@ -103,7 +103,7 @@ createServer(async (req,res) => {
         const response = await fetch('https://api.mercadopago.com/oauth/token',{
           method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},
           body:JSON.stringify({client_id:MP_CLIENT_ID,client_secret:MP_CLIENT_SECRET,
-            grant_type:'authorization_code',code,redirect_uri:mpRedirect,code_verifier:attempt.verifier,test_token:true}),
+            grant_type:'authorization_code',code,redirect_uri:mpRedirect,code_verifier:attempt.verifier,test_token:'true'}),
           signal:AbortSignal.timeout(10000)
         });
         if (!response.ok) {
@@ -113,7 +113,7 @@ createServer(async (req,res) => {
           return fail(reason, response.status);
         }
         const token = await response.json();
-        if (token.live_mode !== false) return fail('sandbox_mode_unconfirmed');
+        if (token.live_mode !== false) return fail(token.live_mode === true ? 'live_token_rejected' : 'sandbox_mode_unconfirmed');
         if (!token.access_token || !token.refresh_token || !token.user_id) return fail('token_response_incomplete');
         db.prepare('INSERT OR REPLACE INTO mp_connections VALUES (?,?,?,?)').run(user.id,String(token.user_id),encryptTokens(token,user.id),Date.now());
         return paymentReturn(res,'connected');
