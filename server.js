@@ -113,12 +113,12 @@ createServer(async (req,res) => {
           return fail(reason, response.status);
         }
         const token = await response.json();
-        const sandboxConfirmed = token.live_mode === false || token.live_mode === 'false';
-        if (!sandboxConfirmed) {
-          const liveMode = token.live_mode === true || token.live_mode === 'true';
-          return fail(liveMode ? 'live_token_rejected' : 'sandbox_mode_unconfirmed', typeof token.live_mode);
-        }
         if (!token.access_token || !token.refresh_token || !token.user_id) return fail('token_response_incomplete');
+        if (token.live_mode === true || token.live_mode === 'true') return fail('live_token_rejected');
+        const testSellerId = process.env.MP_TEST_SELLER_ID?.trim();
+        const sandboxConfirmed = token.live_mode === false || token.live_mode === 'false';
+        const knownTestSeller = token.live_mode === undefined && testSellerId && String(token.user_id) === testSellerId;
+        if (!sandboxConfirmed && !knownTestSeller) return fail('sandbox_mode_unconfirmed', typeof token.live_mode);
         db.prepare('INSERT OR REPLACE INTO mp_connections VALUES (?,?,?,?)').run(user.id,String(token.user_id),encryptTokens(token,user.id),Date.now());
         return paymentReturn(res,'connected');
       } catch {
