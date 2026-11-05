@@ -56,7 +56,12 @@
         <button id="enable-media" type="button">Activar cámara y micrófono</button>
         <button id="camera-toggle" type="button" hidden>Cámara</button>
         <button id="mic-toggle" type="button" hidden>Micrófono</button>
-        <button id="leave" type="button">Salir de la sala</button>
+        <details id="call-menu"><summary>Más opciones ▾</summary><div class="call-menu-panel">
+          <button id="switch-camera" type="button">Cambiar frontal / trasera</button>
+          <label for="camera-device">Cámara<select id="camera-device"><option value="">Selecciona una cámara</option></select></label>
+          <button id="chat-toggle" type="button" aria-expanded="true">Ocultar chat</button>
+        </div></details>
+        <button id="leave" type="button">Finalizar llamada</button>
       </div>
     </div>
     <aside class="call-chat" aria-labelledby="chat-title">

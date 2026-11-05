@@ -50,3 +50,31 @@ header nav{display:flex;gap:1rem}#instructor form{margin-top:1rem}#room button{m
   .call-layout { grid-template-columns: 1fr; }
   .call-videos { grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr)); }
 }
+
+#room { background: #101b20; }
+.call-chat { background: #17272d; }
+#call-messages li { background: #203b40; }
+#call-messages strong { color: #8ce6bc; }
+#room .call-controls button { background: #294047; color: #fff; border-radius: 2rem; }
+#room #enable-media { background: #27b881; color: #061e15; }
+#room #leave { background: #dc4254; color: #fff; }
+.call-stage { position: relative; }
+.call-videos { position: relative; min-height: 380px; background: #081216; border-radius: 1rem; }
+.call-videos .call-tile { aspect-ratio: auto; min-height: 380px; border-radius: 1rem; }
+.call-videos.has-remote .call-local { position: absolute; z-index: 2; top: .8rem; right: .8rem; width: 25%; height: 32%; min-height: 100px; border: 2px solid #ffffff45; box-shadow: 0 6px 20px #0007; }
+.call-videos.has-remote .call-local figcaption { font-size: .75rem; bottom: .3rem; left: .3rem; }
+.call-local.rear-camera video { transform: none; }
+.call-controls { justify-content: center; align-items: center; padding: .5rem 0; }
+#call-menu { position: relative; }
+#call-menu summary { cursor: pointer; padding: .75rem 1rem; border-radius: 2rem; background: #294047; font-weight: 700; list-style: none; }
+.call-menu-panel { position: absolute; z-index: 5; bottom: calc(100% + .6rem); right: 0; width: min(280px,75vw); padding: .8rem; display: grid; gap: .8rem; border: 1px solid #557278; border-radius: 1rem; background: #20363d; box-shadow: 0 10px 30px #0008; }
+.call-menu-panel label { font-size: .9rem; }
+#room.chat-hidden .call-chat { display: none; }
+#room.chat-hidden .call-layout { grid-template-columns: 1fr; }
+@media (max-width:760px) {
+  .call-videos, .call-videos .call-tile { min-height: 55dvh; }
+  .call-videos.has-remote .call-local { min-height: 90px; width: 27%; height: 28%; }
+  #room { margin: .5rem 0; padding: .75rem; }
+  .call-controls { gap: .4rem; }
+  #room .call-controls button, #call-menu summary { font-size: .8rem; padding: .7rem .8rem; }
+}

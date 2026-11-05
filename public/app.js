@@ -43,6 +43,56 @@ chatForm.onsubmit = async event => {
     button.disabled = false;
   }
 };
+const cameraDevice = document.querySelector('#camera-device');
+let cameraFacing = 'user';
+async function loadCameras() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const selected = activeRoom?.localParticipant.getTrackPublication('camera')?.track?.mediaStreamTrack.getSettings().deviceId;
+  cameraDevice.replaceChildren();
+  devices.filter(device => device.kind === 'videoinput').forEach((device, index) => {
+    const option = new Option(device.label || 'Cámara '+(index+1), device.deviceId);
+    option.selected = device.deviceId === selected;
+    cameraDevice.add(option);
+  });
+}
+cameraDevice.onchange = async () => {
+  const room = activeRoom;
+  if (!room || !cameraDevice.value) return;
+  cameraDevice.disabled = true;
+  try {
+    await room.switchActiveDevice('videoinput', cameraDevice.value);
+  } catch {
+    message('No se pudo cambiar a esa cámara.');
+    await loadCameras().catch(() => {});
+  } finally {
+    cameraDevice.disabled = false;
+  }
+};
+document.querySelector('#switch-camera').onclick = async event => {
+  const room = activeRoom;
+  const track = room?.localParticipant.getTrackPublication('camera')?.track;
+  if (!track) { message('Activa la cámara antes de cambiarla.'); return; }
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const facing = track.mediaStreamTrack.getSettings().facingMode || cameraFacing;
+    const next = facing === 'environment' ? 'user' : 'environment';
+    await track.restartTrack({facingMode:{exact:next}});
+    cameraFacing = next;
+    media.querySelector('.call-local')?.classList.toggle('rear-camera',next === 'environment');
+    await loadCameras();
+  } catch {
+    message('Esa cámara no está disponible. Puedes elegir otra en el menú Cámara.');
+  } finally {
+    button.disabled = false;
+  }
+};
+document.querySelector('#chat-toggle').onclick = event => {
+  const button = event.currentTarget;
+  const hidden = roomSection.classList.toggle('chat-hidden');
+  button.textContent = hidden ? 'Mostrar chat' : 'Ocultar chat';
+  button.setAttribute('aria-expanded',String(!hidden));
+};
 const detailId = location.pathname.match(/^\/servicios\/([a-f0-9-]{36})$/)?.[1];
 const detailPanel = document.querySelector('#service-detail');
 const profileForm = document.querySelector('#profile-form');
@@ -221,6 +271,7 @@ async function join(id, credentials) {
   micToggle.hidden = true;
   enableMedia.hidden = false;
   callState.textContent = 'En la sala';
+  cameraFacing = 'user';
   const room = new Room();
   activeRoom = room;
   function attachTrack(track, name, local = false) {
@@ -237,11 +288,13 @@ async function join(id, credentials) {
     label.textContent = name;
     tile.append(element, label);
     media.append(tile);
+    media.classList.toggle('has-remote',Boolean(media.querySelector('.call-tile:not(.call-local)')));
     callWaiting.hidden = true;
   }
   function detachTrack(track) {
     track?.detach().forEach(element => (element.closest('.call-tile') || element).remove());
     callWaiting.hidden = Boolean(media.querySelector('video'));
+    media.classList.toggle('has-remote',Boolean(media.querySelector('.call-tile:not(.call-local)')));
   }
   room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => attachTrack(track, participant.name || 'Participante'));
   room.on(RoomEvent.TrackUnsubscribed, detachTrack);
@@ -419,6 +472,7 @@ enableMedia.onclick = async () => {
     enableMedia.hidden = true;
     cameraToggle.hidden = false;
     micToggle.hidden = false;
+    await loadCameras().catch(() => {});
     cameraToggle.textContent = 'Apagar cámara';
     micToggle.textContent = 'Silenciar micrófono';
   } catch (error) {
