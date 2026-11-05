@@ -7,6 +7,18 @@ const detailId = location.pathname.match(/^\/servicios\/([a-f0-9-]{36})$/)?.[1];
 const detailPanel = document.querySelector('#service-detail');
 const profileForm = document.querySelector('#profile-form');
 let profile;
+let payment;
+const paymentConnect = document.querySelector('#payment-connect');
+paymentConnect.onclick = async () => {
+  paymentConnect.disabled = true;
+  try {
+    const result = await api('mercadopago/connect',{});
+    location.assign(result.url);
+  } catch (error) {
+    message(error.message);
+    paymentConnect.disabled = false;
+  }
+};
 const clp = new Intl.NumberFormat('es-CL',{style:'currency',currency:'CLP'});
 const publishForm = document.querySelector('#publish');
 const priceInput = publishForm.elements.price;
@@ -41,6 +53,10 @@ let user;
 let registering = false;
 function drawAccount() {
   const sameRole = user?.role === role;
+  paymentConnect.disabled = !sameRole || !payment?.available || payment.connected;
+  document.querySelector('#payment-status').textContent = payment?.connected ?
+    'Cuenta de prueba conectada.' : payment?.available ? 'Vincula una cuenta vendedora de prueba para preparar el reparto.' :
+    'La vinculación de prueba está pendiente de configuración.';
   accountForm.hidden = Boolean(user);
   profileForm.hidden = !sameRole;
   document.querySelector('#professional-fields').hidden = !tutorView;
@@ -81,7 +97,7 @@ accountForm.onsubmit = async event => {
     accountForm.reset();
     registering = false;
     drawAccount();
-    profile = (await api('account')).profile;
+    ({profile,payment} = await api('account'));
     drawAccount();
     await refresh();
   } catch (error) { message(error.message); }
@@ -101,6 +117,7 @@ logout.onclick = async () => {
     await api('logout',{});
     user = undefined;
     profile = undefined;
+    payment = undefined;
     drawAccount();
     await refresh();
   } catch (error) { message(error.message); }
@@ -348,5 +365,11 @@ if (location.protocol === "file:") {
   document.querySelector("#publish").hidden = true;
   document.querySelector("#instructor p").textContent = "Vista previa local. Publicar sesiones y reservar requiere iniciar la aplicación.";
 } else {
-  api('account').then(result => { user = result.user; profile = result.profile; drawAccount(); return refresh(); }).catch(error => message(error.message));
+  api('account').then(result => { user = result.user; profile = result.profile; payment = result.payment; drawAccount(); return refresh(); }).catch(error => message(error.message));
+}
+
+const paymentResult = new URLSearchParams(location.search).get('mercadopago');
+if (tutorView && paymentResult) {
+  message(paymentResult === 'connected' ? 'Cuenta de prueba conectada.' : 'No se pudo conectar la cuenta de prueba. Verifica que hayas iniciado sesión como tutor y vuelve a intentarlo.');
+  history.replaceState(null,'',location.pathname);
 }

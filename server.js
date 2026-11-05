@@ -1,5 +1,5 @@
 import {createServer} from 'node:http';
-import {createHmac, randomUUID, scryptSync, timingSafeEqual} from 'node:crypto';
+import {createHmac, randomUUID, scryptSync, timingSafeEqual, randomBytes, createCipheriv, createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 
@@ -41,6 +41,26 @@ function allowAuth(req) {
 }
 const assets = {'/':['index.html','text/html'], '/estudiantes':['index.html','text/html'], '/tutores':['index.html','text/html'], '/app.js':['app.js','text/javascript'], '/servicios/app.js':['app.js','text/javascript'], '/servicios/style.css':['style.css','text/css'], '/style.css':['style.css','text/css'], '/como-funciona.mp4':['como-funciona.mp4','video/mp4']};
 const {LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, INSTRUCTOR_KEY} = process.env;
+const {MP_CLIENT_ID, MP_CLIENT_SECRET, MP_TOKEN_ENCRYPTION_KEY} = process.env;
+const mpRedirect = 'https://viquestudy.tactikaconsulting.com/api/mercadopago/callback';
+const mpConfigured = Boolean(MP_CLIENT_ID && MP_CLIENT_SECRET && /^[a-f0-9]{64}$/i.test(MP_TOKEN_ENCRYPTION_KEY ?? ''));
+db.exec(`CREATE TABLE IF NOT EXISTS mp_oauth(id TEXT PRIMARY KEY, account_id TEXT NOT NULL, verifier TEXT NOT NULL, expires INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS mp_connections(account_id TEXT PRIMARY KEY, seller_id TEXT NOT NULL, encrypted_tokens TEXT NOT NULL, connected_at INTEGER NOT NULL);`);
+function encryptTokens(tokens, accountId) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm',Buffer.from(MP_TOKEN_ENCRYPTION_KEY,'hex'),iv);
+  cipher.setAAD(Buffer.from(accountId));
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(tokens),'utf8'),cipher.final()]);
+  return [iv,cipher.getAuthTag(),encrypted].map(part => part.toString('base64url')).join('.');
+}
+function paymentStatus(user) {
+  const connected = user?.role === 'tutor' && db.prepare('SELECT 1 FROM mp_connections WHERE account_id=?').get(user.id);
+  return {available:mpConfigured,connected:Boolean(connected)};
+}
+function paymentReturn(res, status) {
+  res.writeHead(303,{Location:'/tutores?mercadopago='+status,'Cache-Control':'no-store','Referrer-Policy':'no-referrer'});
+  res.end();
+}
 const send = (res, status, data) => {
   res.writeHead(status, {'Content-Type':'application/json','Cache-Control':'no-store'});
   res.end(JSON.stringify(data));
@@ -65,9 +85,32 @@ createServer(async (req,res) => {
       return res.end(content);
     }
     const user = accountFor(req);
+    if (req.method === 'GET' && path === '/api/mercadopago/callback') {
+      if (!mpConfigured || user?.role !== 'tutor') return paymentReturn(res,'error');
+      const query = new URL(req.url,'http://localhost').searchParams;
+      const state = query.get('state');
+      const attempt = state && db.prepare('DELETE FROM mp_oauth WHERE id=? AND account_id=? AND expires>? RETURNING verifier').get(state,user.id,Date.now());
+      const code = query.get('code');
+      if (!attempt || !code || query.has('error')) return paymentReturn(res,'error');
+      try {
+        const response = await fetch('https://api.mercadopago.com/oauth/token',{
+          method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},
+          body:JSON.stringify({client_id:MP_CLIENT_ID,client_secret:MP_CLIENT_SECRET,
+            grant_type:'authorization_code',code,redirect_uri:mpRedirect,code_verifier:attempt.verifier,test_token:true}),
+          signal:AbortSignal.timeout(10000)
+        });
+        if (!response.ok) return paymentReturn(res,'error');
+        const token = await response.json();
+        if (!token.access_token || !token.refresh_token || !token.user_id || token.live_mode !== false) return paymentReturn(res,'error');
+        db.prepare('INSERT OR REPLACE INTO mp_connections VALUES (?,?,?,?)').run(user.id,String(token.user_id),encryptTokens(token,user.id),Date.now());
+        return paymentReturn(res,'connected');
+      } catch {
+        return paymentReturn(res,'error');
+      }
+    }
     if (req.method === 'GET' && path === '/api/account') {
       const profile = user && db.prepare('SELECT specialty,bio,training,experience FROM profiles WHERE account_id=?').get(user.id);
-      return send(res,200,{user:user || null,profile:profile || null});
+      return send(res,200,{user:user || null,profile:profile || null,payment:paymentStatus(user)});
     }
     if (req.method === 'GET' && path === '/api/classes') {
       return send(res,200,db.prepare(`SELECT classes.*, accounts.name AS tutor_name,
@@ -121,6 +164,19 @@ createServer(async (req,res) => {
       return send(res,200,{user:{id:account.id,name:account.name,role:account.role}});
     }
     const instructor = user?.role === 'tutor';
+    if (path === '/api/mercadopago/connect') {
+      if (!instructor) return send(res,403,{error:'Ingresa con tu cuenta de tutor.'});
+      if (!mpConfigured) return send(res,503,{error:'La vinculación de prueba aún no está configurada.'});
+      const state = randomBytes(32).toString('base64url');
+      const verifier = randomBytes(48).toString('base64url');
+      const challenge = createHash('sha256').update(verifier).digest('base64url');
+      db.prepare('DELETE FROM mp_oauth WHERE expires<=? OR account_id=?').run(Date.now(),user.id);
+      db.prepare('INSERT INTO mp_oauth VALUES (?,?,?,?)').run(state,user.id,verifier,Date.now()+600000);
+      const url = new URL('https://auth.mercadopago.com/authorization');
+      url.search = new URLSearchParams({client_id:MP_CLIENT_ID,response_type:'code',platform_id:'mp',
+        state,redirect_uri:mpRedirect,code_challenge:challenge,code_challenge_method:'S256'}).toString();
+      return send(res,200,{url:url.href});
+    }
     if (path === '/api/profile') {
       if (!user) return send(res,401,{error:'Inicia sesión para editar tu perfil.'});
       const name = typeof input.name === 'string' ? input.name.trim() : '';
