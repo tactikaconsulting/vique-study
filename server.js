@@ -17,6 +17,10 @@ for (const [table, column] of [['classes','tutor_id'],['bookings','student_id'],
   }
 }
 db.exec(`CREATE TABLE IF NOT EXISTS profiles(account_id TEXT PRIMARY KEY, specialty TEXT NOT NULL, bio TEXT NOT NULL, training TEXT NOT NULL, experience TEXT NOT NULL);`);
+const classFields = db.prepare('PRAGMA table_info(classes)').all();
+for (const [column, definition] of [['price_clp','INTEGER NOT NULL DEFAULT 0'],['duration_minutes','INTEGER']]) {
+  if (!classFields.some(field => field.name === column)) db.exec('ALTER TABLE classes ADD COLUMN '+column+' '+definition);
+}
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS booking_student ON bookings(class_id, student_id)');
 const cookie = (value, age) => 'study_session='+value+'; Path=/; HttpOnly; SameSite=Lax; Max-Age='+age+
   (process.env.RAILWAY_ENVIRONMENT ? '; Secure' : '');
@@ -131,6 +135,12 @@ createServer(async (req,res) => {
     if (path === '/api/classes') {
       if (!instructor) return send(res,403,{error:'Ingresa con tu cuenta de tutor.'});
       const {title,kind,date} = input;
+      const price = Number(input.price ?? 0);
+      const duration = input.duration == null ? null : Number(input.duration);
+      if (!Number.isInteger(price) || price < 0 || price > 1000000 ||
+          (duration !== null && (!Number.isInteger(duration) || duration < 5 || duration > 120))) {
+        return send(res,400,{error:'Ingresa un precio válido en pesos y una duración de 5 a 120 minutos.'});
+      }
       const description = typeof input.description === 'string' ? input.description.trim() : '';
       if (description.length>1200) return send(res,400,{error:'La descripción es demasiado extensa.'});
       const category = ['Idiomas','Diseño','Tecnología'].includes(input.category) ? input.category : 'Otras';
@@ -141,7 +151,7 @@ createServer(async (req,res) => {
         return send(res,400,{error:'Revisa el título, horario y cupos.'});
       }
       const id = randomUUID();
-      db.prepare('INSERT INTO classes (id,title,kind,date,capacity,category,tutor_id,description) VALUES (?,?,?,?,?,?,?,?)').run(id,title.trim(),kind,new Date(date).toISOString(),capacity,category,user.id,description);
+      db.prepare('INSERT INTO classes (id,title,kind,date,capacity,category,tutor_id,description,price_clp,duration_minutes) VALUES (?,?,?,?,?,?,?,?,?,?)').run(id,title.trim(),kind,new Date(date).toISOString(),capacity,category,user.id,description,price,duration);
       return send(res,201,{id});
     }
     const session = typeof input.id === 'string' && db.prepare('SELECT * FROM classes WHERE id=?').get(input.id);
@@ -151,6 +161,7 @@ createServer(async (req,res) => {
       const existing = db.prepare('SELECT id FROM bookings WHERE class_id=? AND student_id=?').get(session.id,user.id);
       if (existing) return send(res,200,{booking:existing.id});
       if (Date.parse(session.date) <= Date.now()) return send(res,409,{error:'La inscripción ya cerró.'});
+      if (session.price_clp > 0) return send(res,409,{error:'El pago de esta sesión todavía no está habilitado.'});
       const booking = randomUUID();
       const result = db.prepare(`INSERT INTO bookings (id,class_id,student_id) SELECT ?,id,? FROM classes WHERE id=? AND
         (SELECT count(*) FROM bookings WHERE class_id=classes.id)<capacity`).run(booking,user.id,session.id);

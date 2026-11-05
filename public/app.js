@@ -7,6 +7,21 @@ const detailId = location.pathname.match(/^\/servicios\/([a-f0-9-]{36})$/)?.[1];
 const detailPanel = document.querySelector('#service-detail');
 const profileForm = document.querySelector('#profile-form');
 let profile;
+const clp = new Intl.NumberFormat('es-CL',{style:'currency',currency:'CLP'});
+const publishForm = document.querySelector('#publish');
+const priceInput = publishForm.elements.price;
+const pricePreview = document.querySelector('#price-preview');
+function previewPrice() {
+  const price = Number(priceInput.value);
+  const commission = Math.round(price * 0.15);
+  pricePreview.textContent = !priceInput.validity.valid ? 'Ingresa un precio válido en pesos.' : price > 0 ?
+    'Comisión estimada (15%): '+clp.format(commission)+' · Recibirías '+clp.format(price-commission)+' antes de la tarifa de Mercado Pago.' :
+    'Gratis · sin comisión.';
+}
+priceInput.addEventListener('input',previewPrice);
+function priceLabel(session) {
+  return session.price_clp > 0 ? clp.format(session.price_clp)+' CLP por persona' : 'Gratis';
+}
 const tutorView = location.pathname === '/tutores';
 const catalog = document.querySelector('#catalogo');
 const tutorPanel = document.querySelector('#instructor');
@@ -213,7 +228,10 @@ async function refresh() {
     title.textContent = session.title;
     details.textContent = (session.kind === 'individual' ? 'Clase individual' : 'Taller grupal')+
       ' · '+new Date(session.date).toLocaleString('es-CL')+' · '+session.available+' cupos';
-    card.append(badge,title,details);
+    const price = document.createElement('p');
+    price.className = 'session-price';
+    price.textContent = priceLabel(session)+(session.duration_minutes ? ' · '+session.duration_minutes+' min' : '');
+    card.append(badge,title,details,price);
     if (!tutorView) {
       const link = document.createElement('a');
       link.className = 'service-link';
@@ -228,6 +246,11 @@ async function refresh() {
       if (user?.role === 'tutor') card.append(action('Entrar como tutor',() => join(session.id,{key:key.value})));
     } else if (session.reserved) card.append(action('Entrar a mi clase',() => join(session.id,{})));
     else if (booking) card.append(action('Entrar a mi clase',() => join(session.id,{booking})));
+    else if (session.price_clp > 0) {
+      const pending = document.createElement('p');
+      pending.textContent = 'Pago aún no disponible';
+      card.append(pending);
+    }
     else if (session.available && Date.parse(session.date)>Date.now()) {
       card.append(action('Reservar',async () => {
         if (user?.role !== 'student') {
@@ -271,6 +294,7 @@ function renderDetail(session) {
     info.append(title,text);
   }
   field('Sobre la sesión',session.description || (session.kind === 'individual' ? 'Sesión individual por videollamada.' : 'Sesión grupal por videollamada.'));
+  field('Precio y duración',priceLabel(session)+(session.duration_minutes ? ' · '+session.duration_minutes+' min' : ''));
   field('Horario y cupos',new Date(session.date).toLocaleString('es-CL')+' · '+session.available+' disponibles');
   field('Profesional',session.tutor_name ? [session.tutor_name,session.specialty].filter(Boolean).join(' · ') : 'Perfil aún no publicado');
   field('Presentación',session.bio);
@@ -278,6 +302,7 @@ function renderDetail(session) {
   field('Experiencia declarada',session.experience);
   const booking = localStorage.getItem('study-booking-'+session.id);
   if (session.reserved || booking) info.append(action('Entrar a mi sesión',() => join(session.id,booking ? {booking} : {})));
+  else if (session.price_clp > 0) field('Reserva','Pago aún no disponible.');
   else if (session.available && Date.parse(session.date)>Date.now()) {
     if (user?.role === 'student') info.append(action('Reservar cupo',async () => {
       await api('book',{id:session.id});
