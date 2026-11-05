@@ -8,6 +8,11 @@ const catalog = document.querySelector('#catalogo');
 const tutorPanel = document.querySelector('#instructor');
 const hero = document.querySelector('.hero');
 const guide = document.querySelector('#como-funciona');
+const dashboard = document.querySelector('#dashboard');
+const dashboardTitle = document.querySelector('#dashboard-title');
+const dashboardCopy = document.querySelector('#dashboard-copy');
+const dashboardPrimary = document.querySelector('#dashboard-primary');
+const myBookings = document.querySelector('#my-bookings');
 const accountPanel = document.querySelector('#account');
 const accountForm = document.querySelector('#account-form');
 const logout = document.querySelector('#account-logout');
@@ -29,6 +34,14 @@ function drawAccount() {
   accountForm.elements.password.autocomplete = registering ? 'new-password' : 'current-password';
   document.querySelector('#account-submit').textContent = registering ? 'Crear cuenta' : 'Iniciar sesión';
   document.querySelector('#account-toggle').textContent = registering ? 'Ya tengo cuenta' : 'Crear cuenta';
+  const signedIn = Boolean(sameRole);
+  dashboardTitle.textContent = signedIn ? 'Hola, '+user.name : tutorView ? 'Espacio de tutores' : 'Espacio de estudiantes';
+  dashboardCopy.textContent = tutorView ? 'Publica clases individuales y talleres. Desde aquí puedes entrar a tus sesiones.' :
+    'Encuentra tu próxima clase y accede a tus reservas desde cualquier dispositivo.';
+  dashboardPrimary.href = tutorView && signedIn ? '#instructor' : signedIn ? '#catalogo' : '#account';
+  dashboardPrimary.textContent = tutorView && signedIn ? 'Publicar una clase' : signedIn ? 'Explorar cursos' : 'Acceder a mi cuenta';
+  myBookings.hidden = user?.role !== 'student' || !accountPage;
+  if (myBookings.hidden) myBookings.setAttribute('aria-pressed','false');
   showWorkspace();
 }
 document.querySelector('#account-toggle').onclick = () => {
@@ -59,13 +72,18 @@ logout.onclick = async () => {
 };
 function showWorkspace(inRoom = false) {
   hero.hidden = inRoom || tutorView || location.pathname === '/estudiantes';
-  guide.hidden = inRoom || tutorView;
-  catalog.hidden = inRoom;
+  guide.hidden = inRoom || accountPage;
+  dashboard.hidden = inRoom || !accountPage;
+  catalog.hidden = inRoom || (tutorView && user?.role !== 'tutor');
   accountPanel.hidden = inRoom || !accountPage;
   tutorPanel.hidden = inRoom || !tutorView || user?.role !== 'tutor';
 }
 showWorkspace();
-if (tutorView) catalog.querySelector('h2').textContent = 'Sesiones para impartir';
+if (tutorView) {
+  catalog.querySelector('h2').textContent = 'Mis clases y talleres';
+  document.querySelector('#pilot-note').textContent = 'Aquí puedes entrar a tus sesiones publicadas.';
+  catalog.before(tutorPanel);
+}
 let activeRoom;
 let statusTimer;
 function message(text) {
@@ -132,6 +150,10 @@ category.addEventListener('change', applyFilter);
 const courseCount = document.querySelector('#course-count');
 const normalize = text => text.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
 search.addEventListener('input', applyFilter);
+myBookings.onclick = () => {
+  myBookings.setAttribute('aria-pressed',String(myBookings.getAttribute('aria-pressed') !== 'true'));
+  applyFilter();
+};
 function applyFilter() {
   const selected = filters.find(button => button.getAttribute('aria-pressed') === 'true').dataset.filter;
   const query = normalize(search.value.trim());
@@ -139,7 +161,8 @@ function applyFilter() {
   let count = 0;
   for (const card of cards) {
     const matchesFormat = selected === 'all' || card.dataset.kind === selected;
-    card.hidden = !matchesFormat || (category.value !== 'all' && card.dataset.category !== category.value) || !normalize(card.textContent).includes(query);
+    const matchesBooking = myBookings.getAttribute('aria-pressed') !== 'true' || card.dataset.reserved === 'true';
+    card.hidden = !matchesBooking || !matchesFormat || (category.value !== 'all' && card.dataset.category !== category.value) || !normalize(card.textContent).includes(query);
     if (!card.hidden) count++;
   }
   courseCount.textContent = count === 1 ? '1 resultado' :
@@ -154,20 +177,24 @@ async function refresh() {
   const list = document.querySelector('#classes');
   const sessions = await api('classes');
   list.replaceChildren();
-  if (!sessions.length) list.textContent = 'Todavía no hay sesiones publicadas.';
+
   for (const session of sessions) {
     if (tutorView && !session.mine && session.tutor_id) continue;
     const card = document.createElement('article');
     card.dataset.kind = session.kind;
     card.dataset.category = session.category;
+    const badge = document.createElement('small');
+    badge.className = 'session-badge';
+    badge.textContent = session.category+' · '+(session.kind === 'individual' ? 'Individual' : 'Taller');
     const title = document.createElement('h3');
     const details = document.createElement('p');
     title.textContent = session.title;
     details.textContent = (session.kind === 'individual' ? 'Clase individual' : 'Taller grupal')+
       ' · '+new Date(session.date).toLocaleString('es-CL')+' · '+session.available+' cupos';
-    card.append(title,details);
+    card.append(badge,title,details);
     const storageKey = 'study-booking-'+session.id;
     const booking = localStorage.getItem(storageKey);
+    card.dataset.reserved = String(Boolean(session.reserved || booking));
     if (tutorView) {
       if (user?.role === 'tutor') card.append(action('Entrar como tutor',() => join(session.id,{key:key.value})));
     } else if (session.reserved) card.append(action('Entrar a mi clase',() => join(session.id,{})));
@@ -186,6 +213,12 @@ async function refresh() {
       }));
     }
     list.append(card);
+  }
+  if (!list.children.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = tutorView ? 'Aquí aparecerán las clases que publiques.' : 'Todavía no hay clases publicadas. Vuelve pronto para ver nuevas sesiones.';
+    list.append(empty);
   }
   applyFilter();
 }
