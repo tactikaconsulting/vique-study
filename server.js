@@ -69,6 +69,9 @@ function sellerToken(seller) {
   decipher.setAuthTag(tag);
   return JSON.parse(Buffer.concat([decipher.update(encrypted),decipher.final()]).toString()).access_token;
 }
+function isCheckoutLink(value) {
+  return typeof value === 'string' && /^https:\/\/(www\.)?mercadopago\.cl\/checkout\//.test(value);
+}
 async function mpRequest(seller, path, body) {
   const response = await fetch('https://api.mercadopago.com'+path,{
     method:body ? 'POST' : 'GET',
@@ -314,7 +317,8 @@ createServer(async (req,res) => {
           .run(id,user.id,seller.seller_id,session.price_clp,expires,session.id,now,user.id,now);
         if (!hold.changes) {
           const previous = db.prepare('SELECT checkout_url FROM mp_checkouts WHERE class_id=? AND student_id=? AND expires>?').get(session.id,user.id,now);
-          if (previous?.checkout_url) return send(res,200,{checkoutUrl:previous.checkout_url});
+          if (isCheckoutLink(previous?.checkout_url)) return send(res,200,{checkoutUrl:previous.checkout_url});
+          if (previous?.checkout_url) return send(res,409,{error:'El enlace anterior vence en un máximo de 10 minutos. Luego podrás generar uno nuevo.'});
           return send(res,409,{error:previous ? 'El pago de prueba se está preparando. Intenta en unos segundos.' : 'No quedan cupos.'});
         }
         const returnUrl = new URL('/api/mercadopago/checkout-return',mpRedirect);
@@ -326,8 +330,8 @@ createServer(async (req,res) => {
           back_urls:{success:backUrl,pending:backUrl,failure:backUrl},auto_return:'approved',
           expires:true,expiration_date_from:new Date(now).toISOString(),expiration_date_to:new Date(expires).toISOString()
         }).catch(() => null);
-        const checkoutUrl = preference?.sandbox_init_point;
-        if (typeof checkoutUrl !== 'string' || !/^https:\/\/sandbox\.mercadopago\.(cl|com)\//.test(checkoutUrl)) {
+        const checkoutUrl = preference?.init_point;
+        if (!isCheckoutLink(checkoutUrl)) {
           db.prepare('DELETE FROM mp_checkouts WHERE id=?').run(id);
           return send(res,502,{error:'Mercado Pago no entregó un enlace de prueba. Intenta nuevamente.'});
         }
