@@ -10,7 +10,18 @@
 <article data-kind="taller" data-category="Diseño"><div class="course-art design" aria-hidden="true">✦<span>◒</span></div><small>GRUPAL · EJEMPLO</small><h3>Diseño para redes sociales</h3><p>Crea tu primera pieza gráfica en un taller práctico.</p><details><summary>Ver qué aprenderías</summary><p>Explora color, tipografía y composición mientras diseñas una publicación.</p></details></article>
 <article data-kind="taller" data-category="Tecnología"><div class="course-art data" aria-hidden="true">▦<span>↗</span></div><small>GRUPAL · EJEMPLO</small><h3>Excel desde cero</h3><p>Ordena datos y domina tus primeras fórmulas.</p><details><summary>Ver qué aprenderías</summary><p>Construye una planilla, aplica filtros y calcula totales en una sesión guiada.</p></details></article>
 </div></section>
-<section id="como-funciona"><h2>Así se usa Vique Study</h2><p>Video ilustrativo del recorrido de un alumno.</p><video controls playsinline preload="metadata" aria-label="Guía ilustrativa de Vique Study"><source src="./como-funciona.mp4" type="video/mp4"></video><p>Elige un curso, reserva tu cupo y entra a la clase en el horario indicado.</p></section><section id="instructor" hidden><h2>Panel de tutores</h2><p>Ingresa tu clave para publicar una clase o entrar a una sala.</p><label class="search">Clave de tutor<input id="key" type="password" autocomplete="current-password"></label>
+<section id="como-funciona"><h2>Así se usa Vique Study</h2><p>Video ilustrativo del recorrido de un alumno.</p><video controls playsinline preload="metadata" aria-label="Guía ilustrativa de Vique Study"><source src="./como-funciona.mp4" type="video/mp4"></video><p>Elige un curso, reserva tu cupo y entra a la clase en el horario indicado.</p></section><section id="account" hidden>
+<h2 id="account-title">Tu cuenta</h2><p id="account-status"></p>
+<form id="account-form">
+<label id="account-name" hidden>Nombre<input name="name" autocomplete="name" maxlength="80"></label>
+<label>Correo electrónico<input name="email" type="email" autocomplete="email" required></label>
+<label>Contraseña<input name="password" type="password" autocomplete="current-password" minlength="10" maxlength="128" required></label>
+<label id="account-invite" hidden>Código de invitación<input name="invite" type="password" autocomplete="off"></label>
+<button id="account-submit">Iniciar sesión</button>
+<button type="button" id="account-toggle">Crear cuenta</button>
+</form>
+<button id="account-logout" type="button" hidden>Cerrar sesión</button>
+</section><section id="instructor" hidden><h2>Panel de tutores</h2><p>Publica una clase o taller y accede a tus sesiones.</p><label class="search">Clave para sesiones antiguas<input id="key" type="password" autocomplete="off"></label>
 <noscript><p>La publicación y las reservas requieren abrir la aplicación desde su servidor.</p></noscript><form id="publish"><label>Título<input name="title" required maxlength="100"></label><label>Categoría<select name="category"><option>Idiomas</option><option>Diseño</option><option>Tecnología</option><option>Otras</option></select></label><label>Formato<select name="kind"><option value="individual">Clase individual</option><option value="taller">Taller grupal</option></select></label><label>Fecha y hora local<input name="date" type="datetime-local" required></label><label>Cupos del taller<input name="capacity" type="number" min="1" max="12" value="6" required></label><button>Publicar sesión</button></form>
 </section>
 <section id="room" hidden><h2 tabindex="-1">Sala en vivo</h2><p>Activa tu cámara y micrófono. Si tu navegador te pregunta, elige Permitir.</p><div id="media" class="grid"></div><button id="enable-media" type="button">Activar cámara y micrófono</button><button id="leave">Salir de la sala</button></section>

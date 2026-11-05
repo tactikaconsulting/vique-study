@@ -8,11 +8,61 @@ const catalog = document.querySelector('#catalogo');
 const tutorPanel = document.querySelector('#instructor');
 const hero = document.querySelector('.hero');
 const guide = document.querySelector('#como-funciona');
+const accountPanel = document.querySelector('#account');
+const accountForm = document.querySelector('#account-form');
+const logout = document.querySelector('#account-logout');
+const role = tutorView ? 'tutor' : 'student';
+const accountPage = tutorView || location.pathname === '/estudiantes';
+let user;
+let registering = false;
+function drawAccount() {
+  const sameRole = user?.role === role;
+  accountForm.hidden = Boolean(user);
+  logout.hidden = !user;
+  document.querySelector('#account-title').textContent = tutorView ? 'Acceso de tutores' : 'Acceso de estudiantes';
+  document.querySelector('#account-status').textContent = sameRole ? 'Hola, '+user.name :
+    user ? 'Tienes una sesión de otro tipo. Cierra sesión para entrar aquí.' : '';
+  document.querySelector('#account-name').hidden = !registering;
+  accountForm.elements.name.required = registering;
+  document.querySelector('#account-invite').hidden = !registering || !tutorView;
+  accountForm.elements.invite.required = registering && tutorView;
+  accountForm.elements.password.autocomplete = registering ? 'new-password' : 'current-password';
+  document.querySelector('#account-submit').textContent = registering ? 'Crear cuenta' : 'Iniciar sesión';
+  document.querySelector('#account-toggle').textContent = registering ? 'Ya tengo cuenta' : 'Crear cuenta';
+  showWorkspace();
+}
+document.querySelector('#account-toggle').onclick = () => {
+  registering = !registering;
+  drawAccount();
+};
+accountForm.onsubmit = async event => {
+  event.preventDefault();
+  const submit = document.querySelector('#account-submit');
+  submit.disabled = true;
+  try {
+    const data = Object.fromEntries(new FormData(accountForm));
+    ({user} = await api(registering ? 'register' : 'login',{...data,role}));
+    accountForm.reset();
+    registering = false;
+    drawAccount();
+    await refresh();
+  } catch (error) { message(error.message); }
+  finally { submit.disabled = false; }
+};
+logout.onclick = async () => {
+  try {
+    await api('logout',{});
+    user = undefined;
+    drawAccount();
+    await refresh();
+  } catch (error) { message(error.message); }
+};
 function showWorkspace(inRoom = false) {
   hero.hidden = inRoom || tutorView || location.pathname === '/estudiantes';
   guide.hidden = inRoom || tutorView;
   catalog.hidden = inRoom;
-  tutorPanel.hidden = inRoom || !tutorView;
+  accountPanel.hidden = inRoom || !accountPage;
+  tutorPanel.hidden = inRoom || !tutorView || user?.role !== 'tutor';
 }
 showWorkspace();
 if (tutorView) catalog.querySelector('h2').textContent = 'Sesiones para impartir';
@@ -106,6 +156,7 @@ async function refresh() {
   list.replaceChildren();
   if (!sessions.length) list.textContent = 'Todavía no hay sesiones publicadas.';
   for (const session of sessions) {
+    if (tutorView && !session.mine && session.tutor_id) continue;
     const card = document.createElement('article');
     card.dataset.kind = session.kind;
     card.dataset.category = session.category;
@@ -117,14 +168,21 @@ async function refresh() {
     card.append(title,details);
     const storageKey = 'study-booking-'+session.id;
     const booking = localStorage.getItem(storageKey);
-    if (tutorView) card.append(action('Entrar como tutor',() => join(session.id,{key:key.value})));
+    if (tutorView) {
+      if (user?.role === 'tutor') card.append(action('Entrar como tutor',() => join(session.id,{key:key.value})));
+    } else if (session.reserved) card.append(action('Entrar a mi clase',() => join(session.id,{})));
     else if (booking) card.append(action('Entrar a mi clase',() => join(session.id,{booking})));
     else if (session.available && Date.parse(session.date)>Date.now()) {
       card.append(action('Reservar',async () => {
-        const result = await api('book',{id:session.id});
-        localStorage.setItem(storageKey,result.booking);
+        if (user?.role !== 'student') {
+          if (!accountPage) { location.href = '/estudiantes'; return; }
+          accountPanel.scrollIntoView();
+          message('Crea una cuenta de estudiante o inicia sesión para reservar.');
+          return;
+        }
+        await api('book',{id:session.id});
         await refresh();
-        message('Reserva guardada en este navegador.');
+        message('Reserva guardada en tu cuenta.');
       }));
     }
     list.append(card);
@@ -160,5 +218,5 @@ if (location.protocol === "file:") {
   document.querySelector("#publish").hidden = true;
   document.querySelector("#instructor p").textContent = "Vista previa local. Publicar sesiones y reservar requiere iniciar la aplicación.";
 } else {
-  refresh().catch(error => message(error.message));
+  api('account').then(result => { user = result.user; drawAccount(); return refresh(); }).catch(error => message(error.message));
 }
