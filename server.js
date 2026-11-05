@@ -86,12 +86,19 @@ createServer(async (req,res) => {
     }
     const user = accountFor(req);
     if (req.method === 'GET' && path === '/api/mercadopago/callback') {
-      if (!mpConfigured || user?.role !== 'tutor') return paymentReturn(res,'error');
+      const fail = (reason, status) => {
+        console.warn('Mercado Pago OAuth', reason, status ?? '');
+        return paymentReturn(res,'error');
+      };
+      if (!mpConfigured) return fail('configuration_missing');
+      if (user?.role !== 'tutor') return fail('tutor_session_missing');
       const query = new URL(req.url,'http://localhost').searchParams;
       const state = query.get('state');
       const attempt = state && db.prepare('DELETE FROM mp_oauth WHERE id=? AND account_id=? AND expires>? RETURNING verifier').get(state,user.id,Date.now());
       const code = query.get('code');
-      if (!attempt || !code || query.has('error')) return paymentReturn(res,'error');
+      if (query.has('error')) return fail('authorization_rejected');
+      if (!attempt) return fail('attempt_missing_or_expired');
+      if (!code) return fail('authorization_code_missing');
       try {
         const response = await fetch('https://api.mercadopago.com/oauth/token',{
           method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},
@@ -99,13 +106,19 @@ createServer(async (req,res) => {
             grant_type:'authorization_code',code,redirect_uri:mpRedirect,code_verifier:attempt.verifier,test_token:true}),
           signal:AbortSignal.timeout(10000)
         });
-        if (!response.ok) return paymentReturn(res,'error');
+        if (!response.ok) {
+          const failure = await response.json().catch(() => null);
+          const knownErrors = ['invalid_client','invalid_grant','invalid_request','unauthorized_client','invalid_scope','access_denied'];
+          const reason = knownErrors.includes(failure?.error) ? failure.error : 'token_request_rejected';
+          return fail(reason, response.status);
+        }
         const token = await response.json();
-        if (!token.access_token || !token.refresh_token || !token.user_id || token.live_mode !== false) return paymentReturn(res,'error');
+        if (token.live_mode !== false) return fail('sandbox_mode_unconfirmed');
+        if (!token.access_token || !token.refresh_token || !token.user_id) return fail('token_response_incomplete');
         db.prepare('INSERT OR REPLACE INTO mp_connections VALUES (?,?,?,?)').run(user.id,String(token.user_id),encryptTokens(token,user.id),Date.now());
         return paymentReturn(res,'connected');
       } catch {
-        return paymentReturn(res,'error');
+        return fail('token_exchange_or_storage_failed');
       }
     }
     if (req.method === 'GET' && path === '/api/account') {
