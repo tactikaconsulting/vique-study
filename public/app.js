@@ -31,6 +31,15 @@ function previewPrice() {
     'Gratis · sin comisión.';
 }
 priceInput.addEventListener('input',previewPrice);
+async function reserveSession(session) {
+  const result = await api('book',{id:session.id});
+  if (result.checkoutUrl) {
+    location.assign(result.checkoutUrl);
+    return;
+  }
+  await refresh();
+  message('Reserva guardada en tu cuenta.');
+}
 function priceLabel(session) {
   return session.price_clp > 0 ? clp.format(session.price_clp)+' CLP por persona' : 'Gratis';
 }
@@ -263,22 +272,19 @@ async function refresh() {
       if (user?.role === 'tutor') card.append(action('Entrar como tutor',() => join(session.id,{key:key.value})));
     } else if (session.reserved) card.append(action('Entrar a mi clase',() => join(session.id,{})));
     else if (booking) card.append(action('Entrar a mi clase',() => join(session.id,{booking})));
-    else if (session.price_clp > 0) {
+    else if (session.price_clp > 0 && !session.checkout_ready) {
       const pending = document.createElement('p');
-      pending.textContent = 'Pago aún no disponible';
+      pending.textContent = 'Pago de prueba aún no disponible';
       card.append(pending);
-    }
-    else if (session.available && Date.parse(session.date)>Date.now()) {
-      card.append(action('Reservar',async () => {
+    } else if ((session.available || session.checkout_pending) && Date.parse(session.date)>Date.now()) {
+      card.append(action(session.price_clp > 0 ? 'Reservar y pagar (prueba)' : 'Reservar',async () => {
         if (user?.role !== 'student') {
           if (!accountPage) { location.href = '/estudiantes'; return; }
           accountPanel.scrollIntoView();
           message('Crea una cuenta de estudiante o inicia sesión para reservar.');
           return;
         }
-        await api('book',{id:session.id});
-        await refresh();
-        message('Reserva guardada en tu cuenta.');
+        await reserveSession(session);
       }));
     }
     list.append(card);
@@ -319,13 +325,9 @@ function renderDetail(session) {
   field('Experiencia declarada',session.experience);
   const booking = localStorage.getItem('study-booking-'+session.id);
   if (session.reserved || booking) info.append(action('Entrar a mi sesión',() => join(session.id,booking ? {booking} : {})));
-  else if (session.price_clp > 0) field('Reserva','Pago aún no disponible.');
-  else if (session.available && Date.parse(session.date)>Date.now()) {
-    if (user?.role === 'student') info.append(action('Reservar cupo',async () => {
-      await api('book',{id:session.id});
-      await refresh();
-      message('Reserva guardada en tu cuenta.');
-    }));
+  else if (session.price_clp > 0 && !session.checkout_ready) field('Reserva','Pago de prueba aún no disponible.');
+  else if ((session.available || session.checkout_pending) && Date.parse(session.date)>Date.now()) {
+    if (user?.role === 'student') info.append(action(session.price_clp > 0 ? 'Reservar y pagar (prueba)' : 'Reservar cupo',() => reserveSession(session)));
     else {
       const link = document.createElement('a');
       link.href = '/estudiantes#account';
@@ -371,5 +373,16 @@ if (location.protocol === "file:") {
 const paymentResult = new URLSearchParams(location.search).get('mercadopago');
 if (tutorView && paymentResult) {
   message(paymentResult === 'connected' ? 'Cuenta de prueba conectada.' : 'No se pudo conectar la cuenta de prueba. Verifica que hayas iniciado sesión como tutor y vuelve a intentarlo.');
+  history.replaceState(null,'',location.pathname);
+}
+
+const purchaseResult = new URLSearchParams(location.search).get('compra');
+if (purchaseResult) {
+  const purchaseMessages = {
+    confirmed:'Pago de prueba aprobado. Tu reserva está confirmada.',
+    pending:'El pago de prueba aún no está confirmado.',
+    unavailable:'El pago de prueba fue aprobado, pero el cupo ya no está disponible.'
+  };
+  message(purchaseMessages[purchaseResult] || purchaseMessages.pending);
   history.replaceState(null,'',location.pathname);
 }

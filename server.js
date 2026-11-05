@@ -1,5 +1,5 @@
 import {createServer} from 'node:http';
-import {createHmac, randomUUID, scryptSync, timingSafeEqual, randomBytes, createCipheriv, createHash} from 'node:crypto';
+import {createHmac, randomUUID, scryptSync, timingSafeEqual, randomBytes, createCipheriv, createDecipheriv, createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 
@@ -52,6 +52,35 @@ function encryptTokens(tokens, accountId) {
   cipher.setAAD(Buffer.from(accountId));
   const encrypted = Buffer.concat([cipher.update(JSON.stringify(tokens),'utf8'),cipher.final()]);
   return [iv,cipher.getAuthTag(),encrypted].map(part => part.toString('base64url')).join('.');
+}
+db.exec(`CREATE TABLE IF NOT EXISTS mp_checkouts(
+  id TEXT PRIMARY KEY, class_id TEXT NOT NULL, student_id TEXT NOT NULL,
+  seller_id TEXT NOT NULL, amount INTEGER NOT NULL, expires INTEGER NOT NULL,
+  checkout_url TEXT, payment_id TEXT UNIQUE, CHECK(amount>0));`);
+function testSeller(classId) {
+  return mpConfigured && db.prepare(`SELECT mp_connections.* FROM mp_connections
+    JOIN classes ON classes.tutor_id=mp_connections.account_id
+    WHERE classes.id=? AND seller_id=?`).get(classId, process.env.MP_TEST_SELLER_ID?.trim() || '');
+}
+function sellerToken(seller) {
+  const [iv, tag, encrypted] = seller.encrypted_tokens.split('.').map(part => Buffer.from(part,'base64url'));
+  const decipher = createDecipheriv('aes-256-gcm',Buffer.from(MP_TOKEN_ENCRYPTION_KEY,'hex'),iv);
+  decipher.setAAD(Buffer.from(seller.account_id));
+  decipher.setAuthTag(tag);
+  return JSON.parse(Buffer.concat([decipher.update(encrypted),decipher.final()]).toString()).access_token;
+}
+async function mpRequest(seller, path, body) {
+  const response = await fetch('https://api.mercadopago.com'+path,{
+    method:body ? 'POST' : 'GET',
+    headers:{Authorization:'Bearer '+sellerToken(seller),'Content-Type':'application/json'},
+    body:body && JSON.stringify(body),
+    signal:AbortSignal.timeout(10000)
+  });
+  if (!response.ok) {
+    console.warn('Mercado Pago checkout',path.startsWith('/v1/payments/') ? 'payment_lookup' : 'preference',response.status);
+    return null;
+  }
+  return response.json();
 }
 function paymentStatus(user) {
   const connected = user?.role === 'tutor' && db.prepare('SELECT 1 FROM mp_connections WHERE account_id=?').get(user.id);
@@ -125,6 +154,39 @@ createServer(async (req,res) => {
         return fail('token_exchange_or_storage_failed');
       }
     }
+    if (req.method === 'GET' && path === '/api/mercadopago/checkout-return') {
+      const query = new URL(req.url,'http://localhost').searchParams;
+      const order = user?.role === 'student' && db.prepare('SELECT * FROM mp_checkouts WHERE id=? AND student_id=?').get(query.get('order'),user.id);
+      const paymentId = query.get('payment_id') || '';
+      const seller = order && testSeller(order.class_id);
+      let result = 'pending';
+      if (order?.payment_id) result = 'confirmed';
+      else if (seller && seller.seller_id === order.seller_id && /^\d{1,20}$/.test(paymentId)) {
+        const payment = await mpRequest(seller,'/v1/payments/'+paymentId).catch(() => null);
+        if (payment?.status === 'approved' && payment.live_mode !== true && payment.live_mode !== 'true' &&
+            String(payment.id) === paymentId && payment.external_reference === order.id &&
+            String(payment.collector_id) === order.seller_id && payment.currency_id === 'CLP' &&
+            payment.transaction_amount === order.amount) {
+          db.exec('BEGIN IMMEDIATE');
+          try {
+            const current = db.prepare('SELECT payment_id FROM mp_checkouts WHERE id=?').get(order.id);
+            const booked = current && db.prepare(`INSERT OR IGNORE INTO bookings(id,class_id,student_id)
+              SELECT ?,id,? FROM classes WHERE id=? AND date>? AND
+              (SELECT count(*) FROM bookings WHERE class_id=classes.id)+
+              (SELECT count(*) FROM mp_checkouts WHERE class_id=classes.id AND id<>? AND payment_id IS NULL AND expires>?)<capacity`)
+              .run(order.id,user.id,order.class_id,new Date().toISOString(),order.id,Date.now());
+            if (booked?.changes) db.prepare('UPDATE mp_checkouts SET payment_id=? WHERE id=?').run(paymentId,order.id);
+            result = current?.payment_id || booked?.changes ? 'confirmed' : 'unavailable';
+            db.exec('COMMIT');
+          } catch (error) {
+            db.exec('ROLLBACK');
+            throw error;
+          }
+        }
+      }
+      res.writeHead(303,{Location:'/estudiantes?compra='+result,'Cache-Control':'no-store','Referrer-Policy':'no-referrer'});
+      return res.end();
+    }
     if (req.method === 'GET' && path === '/api/account') {
       const profile = user && db.prepare('SELECT specialty,bio,training,experience FROM profiles WHERE account_id=?').get(user.id);
       return send(res,200,{user:user || null,profile:profile || null,payment:paymentStatus(user)});
@@ -132,11 +194,14 @@ createServer(async (req,res) => {
     if (req.method === 'GET' && path === '/api/classes') {
       return send(res,200,db.prepare(`SELECT classes.*, accounts.name AS tutor_name,
         profiles.specialty, profiles.bio, profiles.training, profiles.experience,
-        capacity-(SELECT count(*) FROM bookings WHERE class_id=classes.id) AS available,
+        capacity-(SELECT count(*) FROM bookings WHERE class_id=classes.id)-
+        (SELECT count(*) FROM mp_checkouts WHERE class_id=classes.id AND payment_id IS NULL AND expires>?) AS available,
+        EXISTS(SELECT 1 FROM mp_connections WHERE account_id=classes.tutor_id AND seller_id=?) AS checkout_ready,
+        EXISTS(SELECT 1 FROM mp_checkouts WHERE class_id=classes.id AND student_id=? AND payment_id IS NULL AND expires>?) AS checkout_pending,
         CASE WHEN tutor_id=? THEN 1 ELSE 0 END AS mine,
         EXISTS(SELECT 1 FROM bookings WHERE class_id=classes.id AND student_id=?) AS reserved
         FROM classes LEFT JOIN accounts ON accounts.id=classes.tutor_id
-        LEFT JOIN profiles ON profiles.account_id=classes.tutor_id ORDER BY date`).all(user?.id ?? null,user?.id ?? null));
+        LEFT JOIN profiles ON profiles.account_id=classes.tutor_id ORDER BY date`).all(Date.now(),mpConfigured ? process.env.MP_TEST_SELLER_ID?.trim() || '' : '',user?.id ?? null,Date.now(),user?.id ?? null,user?.id ?? null));
     }
     if (req.method !== 'POST') return send(res,404,{error:'Página inexistente.'});
     let raw = '';
@@ -234,14 +299,48 @@ createServer(async (req,res) => {
       const existing = db.prepare('SELECT id FROM bookings WHERE class_id=? AND student_id=?').get(session.id,user.id);
       if (existing) return send(res,200,{booking:existing.id});
       if (Date.parse(session.date) <= Date.now()) return send(res,409,{error:'La inscripción ya cerró.'});
-      if (session.price_clp > 0) return send(res,409,{error:'El pago de esta sesión todavía no está habilitado.'});
+      if (session.price_clp > 0) {
+        const seller = testSeller(session.id);
+        if (!seller) return send(res,409,{error:'El pago de prueba aún no está disponible para esta clase.'});
+        const now = Date.now();
+        const expires = Math.min(now+10*60000,Date.parse(session.date));
+        const id = randomUUID();
+
+        const hold = db.prepare(`INSERT OR IGNORE INTO mp_checkouts(id,class_id,student_id,seller_id,amount,expires)
+          SELECT ?,id,?,?,?,? FROM classes WHERE id=? AND
+          (SELECT count(*) FROM bookings WHERE class_id=classes.id)+
+          (SELECT count(*) FROM mp_checkouts WHERE class_id=classes.id AND payment_id IS NULL AND expires>?)<capacity
+          AND NOT EXISTS (SELECT 1 FROM mp_checkouts WHERE class_id=classes.id AND student_id=? AND expires>?)`)
+          .run(id,user.id,seller.seller_id,session.price_clp,expires,session.id,now,user.id,now);
+        if (!hold.changes) {
+          const previous = db.prepare('SELECT checkout_url FROM mp_checkouts WHERE class_id=? AND student_id=? AND expires>?').get(session.id,user.id,now);
+          if (previous?.checkout_url) return send(res,200,{checkoutUrl:previous.checkout_url});
+          return send(res,409,{error:previous ? 'El pago de prueba se está preparando. Intenta en unos segundos.' : 'No quedan cupos.'});
+        }
+        const returnUrl = new URL('/api/mercadopago/checkout-return',mpRedirect);
+        returnUrl.searchParams.set('order',id);
+        const backUrl = returnUrl.href;
+        const preference = await mpRequest(seller,'/checkout/preferences',{
+          items:[{id:session.id,title:session.title,quantity:1,currency_id:'CLP',unit_price:session.price_clp}],
+          marketplace_fee:Math.round(session.price_clp*0.15),external_reference:id,
+          back_urls:{success:backUrl,pending:backUrl,failure:backUrl},auto_return:'approved',
+          expires:true,expiration_date_from:new Date(now).toISOString(),expiration_date_to:new Date(expires).toISOString()
+        }).catch(() => null);
+        const checkoutUrl = preference?.sandbox_init_point;
+        if (typeof checkoutUrl !== 'string' || !/^https:\/\/sandbox\.mercadopago\.(cl|com)\//.test(checkoutUrl)) {
+          db.prepare('DELETE FROM mp_checkouts WHERE id=?').run(id);
+          return send(res,502,{error:'Mercado Pago no entregó un enlace de prueba. Intenta nuevamente.'});
+        }
+        db.prepare('UPDATE mp_checkouts SET checkout_url=? WHERE id=?').run(checkoutUrl,id);
+        return send(res,201,{checkoutUrl});
+      }
       const booking = randomUUID();
       const result = db.prepare(`INSERT INTO bookings (id,class_id,student_id) SELECT ?,id,? FROM classes WHERE id=? AND
         (SELECT count(*) FROM bookings WHERE class_id=classes.id)<capacity`).run(booking,user.id,session.id);
       return result.changes ? send(res,201,{booking}) : send(res,409,{error:'No quedan cupos.'});
     }
     if (path === '/api/join') {
-      const booking = typeof input.booking === 'string' && db.prepare('SELECT id FROM bookings WHERE id=? AND class_id=?').get(input.booking,session.id);
+      const booking = session.price_clp === 0 && typeof input.booking === 'string' && db.prepare('SELECT id FROM bookings WHERE id=? AND class_id=?').get(input.booking,session.id);
       const ownBooking = user?.role === 'student' && db.prepare('SELECT id FROM bookings WHERE class_id=? AND student_id=?').get(session.id,user.id);
       const ownClass = instructor && session.tutor_id === user.id;
       const legacyTutor = !session.tutor_id && INSTRUCTOR_KEY && input.key === INSTRUCTOR_KEY;
