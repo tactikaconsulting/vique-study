@@ -3,6 +3,46 @@ const media = document.querySelector('#media');
 const roomSection = document.querySelector('#room');
 const key = document.querySelector('#key');
 const enableMedia = document.querySelector('#enable-media');
+const cameraToggle = document.querySelector('#camera-toggle');
+const micToggle = document.querySelector('#mic-toggle');
+const callMessages = document.querySelector('#call-messages');
+const chatForm = document.querySelector('#call-chat-form');
+const chatInput = document.querySelector('#call-message');
+const callState = document.querySelector('#call-state');
+const callWaiting = document.querySelector('#call-waiting');
+const chatTopic = 'vique-study-chat';
+
+function addChatMessage(name, body) {
+  const item = document.createElement('li');
+  const author = document.createElement('strong');
+  const content = document.createElement('span');
+  author.textContent = name;
+  content.textContent = body;
+  item.append(author, content);
+  callMessages.append(item);
+  if (callMessages.children.length > 200) callMessages.firstElementChild.remove();
+  callMessages.scrollTop = callMessages.scrollHeight;
+}
+
+chatForm.onsubmit = async event => {
+  event.preventDefault();
+  const room = activeRoom;
+  const body = chatInput.value.trim();
+  const button = chatForm.querySelector('button');
+  if (!room || !body || button.disabled) return;
+  button.disabled = true;
+  try {
+    await room.localParticipant.publishData(new TextEncoder().encode(body), {reliable:true, topic:chatTopic});
+    if (activeRoom !== room) return;
+    addChatMessage('Tú', body);
+    if (chatInput.value.trim() === body) chatInput.value = '';
+    chatInput.focus();
+  } catch {
+    if (activeRoom === room) message('No se pudo enviar el mensaje. Intenta nuevamente.');
+  } finally {
+    button.disabled = false;
+  }
+};
 const detailId = location.pathname.match(/^\/servicios\/([a-f0-9-]{36})$/)?.[1];
 const detailPanel = document.querySelector('#service-detail');
 const profileForm = document.querySelector('#profile-form');
@@ -174,17 +214,48 @@ async function join(id, credentials) {
   const {Room, RoomEvent} = await import('https://cdn.jsdelivr.net/npm/livekit-client@2.22.3/+esm');
   if (activeRoom) await activeRoom.disconnect();
   media.replaceChildren();
+  chatForm.reset();
+  callMessages.replaceChildren();
+  callWaiting.hidden = false;
+  cameraToggle.hidden = true;
+  micToggle.hidden = true;
+  enableMedia.hidden = false;
+  callState.textContent = 'En la sala';
   const room = new Room();
   activeRoom = room;
-  room.on(RoomEvent.TrackSubscribed,track => media.append(track.attach()));
-  room.on(RoomEvent.TrackUnsubscribed,track => track.detach().forEach(element => element.remove()));
-  room.on(RoomEvent.LocalTrackPublished,publication => {
-    if (publication.track?.kind === 'video') {
-      const element = publication.track.attach();
-      element.muted = true;
+  function attachTrack(track, name, local = false) {
+    const element = track.attach();
+    if (track.kind !== 'video') {
       media.append(element);
+      return;
     }
+    element.playsInline = true;
+    element.muted = local;
+    const tile = document.createElement('figure');
+    tile.className = local ? 'call-tile call-local' : 'call-tile';
+    const label = document.createElement('figcaption');
+    label.textContent = name;
+    tile.append(element, label);
+    media.append(tile);
+    callWaiting.hidden = true;
+  }
+  function detachTrack(track) {
+    track?.detach().forEach(element => (element.closest('.call-tile') || element).remove());
+    callWaiting.hidden = Boolean(media.querySelector('video'));
+  }
+  room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => attachTrack(track, participant.name || 'Participante'));
+  room.on(RoomEvent.TrackUnsubscribed, detachTrack);
+  room.on(RoomEvent.LocalTrackPublished, publication => {
+    if (publication.track?.kind === 'video') attachTrack(publication.track, 'Tú', true);
   });
+  room.on(RoomEvent.LocalTrackUnpublished, publication => detachTrack(publication.track));
+  room.on(RoomEvent.DataReceived, (payload, participant, kind, topic) => {
+    if (activeRoom !== room || !participant || topic !== chatTopic || payload.byteLength > 2000) return;
+    const body = new TextDecoder().decode(payload).trim();
+    if (body && body.length <= 500) addChatMessage(participant.name || 'Participante', body);
+  });
+  room.on(RoomEvent.Reconnecting, () => { callState.textContent = 'Reconectando…'; });
+  room.on(RoomEvent.Reconnected, () => { callState.textContent = 'En la sala'; });
   room.on(RoomEvent.Disconnected,() => {
     if (activeRoom === room) {
       media.replaceChildren();
@@ -344,7 +415,12 @@ enableMedia.onclick = async () => {
   enableMedia.disabled = true;
   try {
     await Promise.all([room.startAudio(), room.localParticipant.enableCameraAndMicrophone()]);
-    message('Cámara y micrófono activados.');
+    if (activeRoom !== room) return;
+    enableMedia.hidden = true;
+    cameraToggle.hidden = false;
+    micToggle.hidden = false;
+    cameraToggle.textContent = 'Apagar cámara';
+    micToggle.textContent = 'Silenciar micrófono';
   } catch (error) {
     enableMedia.disabled = false;
     message(error.name === 'NotAllowedError' ?
@@ -352,6 +428,24 @@ enableMedia.onclick = async () => {
       error.message);
   }
 };
+function bindMediaToggle(button, field, method, onLabel, offLabel) {
+  button.onclick = async () => {
+    const room = activeRoom;
+    if (!room) return;
+    const participant = room.localParticipant;
+    button.disabled = true;
+    try {
+      await participant[method](!participant[field]);
+      if (activeRoom === room) button.textContent = participant[field] ? onLabel : offLabel;
+    } catch {
+      message('Revisa los permisos de cámara y micrófono.');
+    } finally {
+      button.disabled = false;
+    }
+  };
+}
+bindMediaToggle(cameraToggle,'isCameraEnabled','setCameraEnabled','Apagar cámara','Encender cámara');
+bindMediaToggle(micToggle,'isMicrophoneEnabled','setMicrophoneEnabled','Silenciar micrófono','Activar micrófono');
 document.querySelector('#leave').onclick = () => activeRoom?.disconnect();
 document.querySelector('#publish').onsubmit = async event => {
   event.preventDefault();

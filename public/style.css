@@ -16,3 +16,37 @@ header nav{display:flex;gap:1rem}#instructor form{margin-top:1rem}#room button{m
 #professional-fields{display:grid;gap:1rem}textarea{width:100%;min-height:5rem;font:inherit;padding:.65rem;border:1px solid #90a59d;border-radius:.4rem}.service-link{display:block;margin:.7rem 0;color:#5429a8;font-weight:700}#service-detail{max-width:760px;margin-inline:auto}#service-detail h1{font-size:clamp(2rem,6vw,3.5rem);margin:.6em 0}#service-detail article h2{font-size:1.15rem}#service-detail article p{white-space:pre-wrap}
 
 .payment-setup{margin:1rem 0;padding:1rem;background:#f6f0ff;border-radius:.8rem}.payment-setup h3{margin-top:0}.payment-setup button:disabled{opacity:.55;cursor:default}.session-price{font-weight:750;color:#5127a0}#price-preview{margin:0;color:#5429a8}
+
+#room {
+  padding: clamp(1rem, 3vw, 1.5rem);
+  border-radius: 1.5rem;
+  background: #181329;
+  color: #fff;
+}
+.call-heading { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+.call-heading h2, .call-heading p { margin: .25rem 0; }
+#call-state { color: #d8f4b5; font-size: .9rem; }
+.call-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(245px, .42fr); gap: 1rem; }
+.call-stage { min-width: 0; }
+.call-videos { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: .65rem; }
+.call-tile { position: relative; margin: 0; aspect-ratio: 4 / 3; background: #090711; border-radius: .9rem; overflow: hidden; }
+.call-tile video { display: block; width: 100%; height: 100%; object-fit: contain; background: #090711; }
+.call-local video { transform: scaleX(-1); }
+.call-tile figcaption { position: absolute; bottom: .65rem; left: .65rem; padding: .3rem .55rem; background: #181329e8; border-radius: .4rem; }
+#call-waiting { display: grid; place-items: center; min-height: 12rem; margin: 0; background: #231b39; border-radius: .9rem; text-align: center; }
+.call-controls { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .85rem; }
+#room button { margin: 0; }
+#room button:disabled { opacity: .6; }
+#room #leave { background: #a9274d; color: #fff; }
+.call-chat { display: flex; flex-direction: column; min-width: 0; padding: 1rem; background: #29203f; border-radius: .9rem; }
+.call-chat h3, .call-chat p { margin: 0 0 .5rem; }
+.chat-note { color: #ddd0f0; font-size: .85rem; }
+#call-messages { flex: 1; min-height: 6rem; max-height: 18rem; overflow: auto; padding: 0; margin: 0 0 .6rem; list-style: none; }
+#call-messages li { background: #382b53; padding: .6rem; border-radius: .5rem; margin-top: .4rem; overflow-wrap: anywhere; }
+#call-messages strong, #call-messages span { display: block; }
+#call-messages strong { color: #ffda91; font-size: .8rem; }
+#call-chat-form { padding: 0; background: transparent; border: 0; gap: .5rem; }
+@media (max-width: 760px) {
+  .call-layout { grid-template-columns: 1fr; }
+  .call-videos { grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr)); }
+}

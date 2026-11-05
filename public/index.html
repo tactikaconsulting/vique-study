@@ -43,7 +43,34 @@
 <p>Las sesiones con precio se muestran en el catálogo con las reservas pendientes de habilitación.</p>
 <label>Cupos del taller<input name="capacity" type="number" min="1" max="12" value="6" required></label><button>Publicar sesión</button></form>
 </section>
-<section id="room" hidden><h2 tabindex="-1">Sala en vivo</h2><p>Activa tu cámara y micrófono. Si tu navegador te pregunta, elige Permitir.</p><div id="media" class="grid"></div><button id="enable-media" type="button">Activar cámara y micrófono</button><button id="leave">Salir de la sala</button></section>
+<section id="room" hidden aria-labelledby="room-title">
+  <div class="call-heading">
+    <div><p class="eyebrow">VIQUE STUDY</p><h2 id="room-title" tabindex="-1">Sala en vivo</h2></div>
+    <span id="call-state" role="status">En la sala</span>
+  </div>
+  <div class="call-layout">
+    <div class="call-stage">
+      <div id="media" class="call-videos"></div>
+      <p id="call-waiting">Esperando el video de los participantes…</p>
+      <div class="call-controls">
+        <button id="enable-media" type="button">Activar cámara y micrófono</button>
+        <button id="camera-toggle" type="button" hidden>Cámara</button>
+        <button id="mic-toggle" type="button" hidden>Micrófono</button>
+        <button id="leave" type="button">Salir de la sala</button>
+      </div>
+    </div>
+    <aside class="call-chat" aria-labelledby="chat-title">
+      <h3 id="chat-title">Chat de la sala</h3>
+      <p class="chat-note">Los mensajes se muestran durante la llamada.</p>
+      <ol id="call-messages" role="log" aria-live="polite"></ol>
+      <form id="call-chat-form">
+        <label for="call-message" class="chat-note">Tu mensaje</label>
+        <input id="call-message" type="text" maxlength="500" required autocomplete="off" placeholder="Escribe un mensaje…">
+        <button type="submit">Enviar</button>
+      </form>
+    </aside>
+  </div>
+</section>
 <p id="status" role="status"></p>
 </main>
 </body></html>

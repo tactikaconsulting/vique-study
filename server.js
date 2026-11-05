@@ -101,7 +101,7 @@ const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url')
 function roomToken(room, name) {
   const now = Math.floor(Date.now()/1000);
   const payload = {iss:LIVEKIT_API_KEY, sub:randomUUID(), name, nbf:now-5, exp:now+600,
-    video:{roomJoin:true, room, canPublish:true, canSubscribe:true}};
+    video:{roomJoin:true, room, canPublish:true, canSubscribe:true, canPublishData:true}};
   const body = encode({alg:'HS256',typ:'JWT'})+'.'+encode(payload);
   return body+'.'+createHmac('sha256',LIVEKIT_API_SECRET).update(body).digest('base64url');
 }
