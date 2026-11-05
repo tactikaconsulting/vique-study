@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS bookings(id TEXT PRIMARY KEY, class_id TEXT REFERENCE
 if (!db.prepare('PRAGMA table_info(classes)').all().some(column => column.name === 'category')) {
   db.exec("ALTER TABLE classes ADD COLUMN category TEXT NOT NULL DEFAULT 'Otras'");
 }
-const assets = {'/':['index.html','text/html'], '/app.js':['app.js','text/javascript'], '/style.css':['style.css','text/css'], '/como-funciona.mp4':['como-funciona.mp4','video/mp4']};
+const assets = {'/':['index.html','text/html'], '/estudiantes':['index.html','text/html'], '/tutores':['index.html','text/html'], '/app.js':['app.js','text/javascript'], '/style.css':['style.css','text/css'], '/como-funciona.mp4':['como-funciona.mp4','video/mp4']};
 const {LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, INSTRUCTOR_KEY} = process.env;
 const send = (res, status, data) => {
   res.writeHead(status, {'Content-Type':'application/json','Cache-Control':'no-store'});
@@ -29,8 +29,9 @@ createServer(async (req,res) => {
     const path = new URL(req.url,'http://localhost').pathname;
     if (req.method === 'GET' && assets[path]) {
       const [file,type] = assets[path];
+      const content = readFileSync(new URL('./public/'+file, import.meta.url));
       res.writeHead(200, {'Content-Type':type.startsWith('text/') ? type+'; charset=utf-8' : type});
-      return res.end(readFileSync(new URL('./public/'+file, import.meta.url)));
+      return res.end(content);
     }
     if (req.method === 'GET' && path === '/api/classes') {
       return send(res,200,db.prepare(`SELECT classes.*, capacity-(SELECT count(*) FROM bookings WHERE class_id=classes.id) AS available FROM classes ORDER BY date`).all());
@@ -76,7 +77,9 @@ createServer(async (req,res) => {
       return send(res,200,{url:LIVEKIT_URL,token:roomToken('study-'+session.id,instructor?'Instructor':'Alumno')});
     }
     send(res,404,{error:'Acción inexistente.'});
-  } catch {
+  } catch (error) {
+    console.error(error.message);
+    if (res.headersSent) return res.destroy();
     send(res,500,{error:'Ocurrió un error. Vuelve a intentarlo.'});
   }
 }).listen(process.env.PORT || 3000,'0.0.0.0');

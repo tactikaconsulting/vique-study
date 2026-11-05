@@ -6,3 +6,5 @@
 .search{max-width:32rem;font-weight:650}.search input{background:#fff;border-color:#cbb9e9}#course-count{min-height:1.5em;color:#5f4191}
 
 #category{margin-bottom:.5rem}#como-funciona video{max-width:740px;display:block}
+
+header nav{display:flex;gap:1rem}#instructor form{margin-top:1rem}#room button{margin-top:1rem}#room h2:focus{outline:none}

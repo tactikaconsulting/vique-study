@@ -3,6 +3,19 @@ const media = document.querySelector('#media');
 const roomSection = document.querySelector('#room');
 const key = document.querySelector('#key');
 const enableMedia = document.querySelector('#enable-media');
+const tutorView = location.pathname === '/tutores';
+const catalog = document.querySelector('#catalogo');
+const tutorPanel = document.querySelector('#instructor');
+const hero = document.querySelector('.hero');
+const guide = document.querySelector('#como-funciona');
+function showWorkspace(inRoom = false) {
+  hero.hidden = inRoom || tutorView || location.pathname === '/estudiantes';
+  guide.hidden = inRoom || tutorView;
+  catalog.hidden = inRoom;
+  tutorPanel.hidden = inRoom || !tutorView;
+}
+showWorkspace();
+if (tutorView) catalog.querySelector('h2').textContent = 'Sesiones para impartir';
 let activeRoom;
 let statusTimer;
 function message(text) {
@@ -47,12 +60,15 @@ async function join(id, credentials) {
       media.replaceChildren();
       roomSection.hidden = true;
       activeRoom = undefined;
+      showWorkspace();
     }
   });
   try {
     await room.connect(access.url,access.token);
     enableMedia.disabled = false;
     roomSection.hidden = false;
+    showWorkspace(true);
+    roomSection.querySelector('h2').focus();
     roomSection.scrollIntoView();
   } catch (error) {
     await room.disconnect();
@@ -101,7 +117,8 @@ async function refresh() {
     card.append(title,details);
     const storageKey = 'study-booking-'+session.id;
     const booking = localStorage.getItem(storageKey);
-    if (booking) card.append(action('Entrar como alumno',() => join(session.id,{booking})));
+    if (tutorView) card.append(action('Entrar como tutor',() => join(session.id,{key:key.value})));
+    else if (booking) card.append(action('Entrar a mi clase',() => join(session.id,{booking})));
     else if (session.available && Date.parse(session.date)>Date.now()) {
       card.append(action('Reservar',async () => {
         const result = await api('book',{id:session.id});
@@ -110,7 +127,6 @@ async function refresh() {
         message('Reserva guardada en este navegador.');
       }));
     }
-    card.append(action('Entrar como instructor',() => join(session.id,{key:key.value})));
     list.append(card);
   }
   applyFilter();
