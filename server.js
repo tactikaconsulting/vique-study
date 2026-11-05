@@ -113,7 +113,11 @@ createServer(async (req,res) => {
           return fail(reason, response.status);
         }
         const token = await response.json();
-        if (token.live_mode !== false) return fail(token.live_mode === true ? 'live_token_rejected' : 'sandbox_mode_unconfirmed');
+        const sandboxConfirmed = token.live_mode === false || token.live_mode === 'false';
+        if (!sandboxConfirmed) {
+          const liveMode = token.live_mode === true || token.live_mode === 'true';
+          return fail(liveMode ? 'live_token_rejected' : 'sandbox_mode_unconfirmed', typeof token.live_mode);
+        }
         if (!token.access_token || !token.refresh_token || !token.user_id) return fail('token_response_incomplete');
         db.prepare('INSERT OR REPLACE INTO mp_connections VALUES (?,?,?,?)').run(user.id,String(token.user_id),encryptTokens(token,user.id),Date.now());
         return paymentReturn(res,'connected');
