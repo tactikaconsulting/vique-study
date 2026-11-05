@@ -11,11 +11,12 @@ if (!db.prepare('PRAGMA table_info(classes)').all().some(column => column.name =
 }
 db.exec(`CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, password TEXT NOT NULL, salt TEXT NOT NULL, role TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS logins(id TEXT PRIMARY KEY, account_id TEXT NOT NULL, expires INTEGER NOT NULL);`);
-for (const [table, column] of [['classes','tutor_id'],['bookings','student_id']]) {
+for (const [table, column] of [['classes','tutor_id'],['bookings','student_id'],['classes','description']]) {
   if (!db.prepare('PRAGMA table_info('+table+')').all().some(field => field.name === column)) {
     db.exec('ALTER TABLE '+table+' ADD COLUMN '+column+' TEXT');
   }
 }
+db.exec(`CREATE TABLE IF NOT EXISTS profiles(account_id TEXT PRIMARY KEY, specialty TEXT NOT NULL, bio TEXT NOT NULL, training TEXT NOT NULL, experience TEXT NOT NULL);`);
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS booking_student ON bookings(class_id, student_id)');
 const cookie = (value, age) => 'study_session='+value+'; Path=/; HttpOnly; SameSite=Lax; Max-Age='+age+
   (process.env.RAILWAY_ENVIRONMENT ? '; Secure' : '');
@@ -34,7 +35,7 @@ function allowAuth(req) {
   attempts.set(ip,entry);
   return true;
 }
-const assets = {'/':['index.html','text/html'], '/estudiantes':['index.html','text/html'], '/tutores':['index.html','text/html'], '/app.js':['app.js','text/javascript'], '/style.css':['style.css','text/css'], '/como-funciona.mp4':['como-funciona.mp4','video/mp4']};
+const assets = {'/':['index.html','text/html'], '/estudiantes':['index.html','text/html'], '/tutores':['index.html','text/html'], '/app.js':['app.js','text/javascript'], '/servicios/app.js':['app.js','text/javascript'], '/servicios/style.css':['style.css','text/css'], '/style.css':['style.css','text/css'], '/como-funciona.mp4':['como-funciona.mp4','video/mp4']};
 const {LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, INSTRUCTOR_KEY} = process.env;
 const send = (res, status, data) => {
   res.writeHead(status, {'Content-Type':'application/json','Cache-Control':'no-store'});
@@ -52,19 +53,26 @@ function roomToken(room, name) {
 createServer(async (req,res) => {
   try {
     const path = new URL(req.url,'http://localhost').pathname;
-    if (req.method === 'GET' && assets[path]) {
-      const [file,type] = assets[path];
+    const asset = assets[path] || (/^\/servicios\/[a-f0-9-]{36}$/.test(path) ? assets['/'] : null);
+    if (req.method === 'GET' && asset) {
+      const [file,type] = asset;
       const content = readFileSync(new URL('./public/'+file, import.meta.url));
       res.writeHead(200, {'Content-Type':type.startsWith('text/') ? type+'; charset=utf-8' : type});
       return res.end(content);
     }
     const user = accountFor(req);
-    if (req.method === 'GET' && path === '/api/account') return send(res,200,{user:user || null});
+    if (req.method === 'GET' && path === '/api/account') {
+      const profile = user && db.prepare('SELECT specialty,bio,training,experience FROM profiles WHERE account_id=?').get(user.id);
+      return send(res,200,{user:user || null,profile:profile || null});
+    }
     if (req.method === 'GET' && path === '/api/classes') {
-      return send(res,200,db.prepare(`SELECT classes.*, capacity-(SELECT count(*) FROM bookings WHERE class_id=classes.id) AS available,
+      return send(res,200,db.prepare(`SELECT classes.*, accounts.name AS tutor_name,
+        profiles.specialty, profiles.bio, profiles.training, profiles.experience,
+        capacity-(SELECT count(*) FROM bookings WHERE class_id=classes.id) AS available,
         CASE WHEN tutor_id=? THEN 1 ELSE 0 END AS mine,
         EXISTS(SELECT 1 FROM bookings WHERE class_id=classes.id AND student_id=?) AS reserved
-        FROM classes ORDER BY date`).all(user?.id ?? null,user?.id ?? null));
+        FROM classes LEFT JOIN accounts ON accounts.id=classes.tutor_id
+        LEFT JOIN profiles ON profiles.account_id=classes.tutor_id ORDER BY date`).all(user?.id ?? null,user?.id ?? null));
     }
     if (req.method !== 'POST') return send(res,404,{error:'Página inexistente.'});
     let raw = '';
@@ -109,9 +117,22 @@ createServer(async (req,res) => {
       return send(res,200,{user:{id:account.id,name:account.name,role:account.role}});
     }
     const instructor = user?.role === 'tutor';
+    if (path === '/api/profile') {
+      if (!user) return send(res,401,{error:'Inicia sesión para editar tu perfil.'});
+      const name = typeof input.name === 'string' ? input.name.trim() : '';
+      const limits = {specialty:80,bio:700,training:240,experience:300};
+      const profile = Object.fromEntries(Object.keys(limits).map(field => [field,typeof input[field] === 'string' ? input[field].trim() : '']));
+      if (!name || name.length>80 || Object.keys(limits).some(field => profile[field].length>limits[field])) return send(res,400,{error:'Revisa el nombre y la extensión de tu perfil.'});
+      if (instructor && (!profile.specialty || !profile.bio || !profile.training || !profile.experience)) return send(res,400,{error:'Completa especialidad, presentación, formación y experiencia.'});
+      db.prepare('UPDATE accounts SET name=? WHERE id=?').run(name,user.id);
+      if (instructor) db.prepare('INSERT OR REPLACE INTO profiles VALUES (?,?,?,?,?)').run(user.id,profile.specialty,profile.bio,profile.training,profile.experience);
+      return send(res,200,{user:{...user,name},profile:instructor ? profile : null});
+    }
     if (path === '/api/classes') {
       if (!instructor) return send(res,403,{error:'Ingresa con tu cuenta de tutor.'});
       const {title,kind,date} = input;
+      const description = typeof input.description === 'string' ? input.description.trim() : '';
+      if (description.length>1200) return send(res,400,{error:'La descripción es demasiado extensa.'});
       const category = ['Idiomas','Diseño','Tecnología'].includes(input.category) ? input.category : 'Otras';
       const capacity = kind === 'individual' ? 1 : Number(input.capacity);
       if (typeof title !== 'string' || !title.trim() || title.length > 100 ||
@@ -120,7 +141,7 @@ createServer(async (req,res) => {
         return send(res,400,{error:'Revisa el título, horario y cupos.'});
       }
       const id = randomUUID();
-      db.prepare('INSERT INTO classes (id,title,kind,date,capacity,category,tutor_id) VALUES (?,?,?,?,?,?,?)').run(id,title.trim(),kind,new Date(date).toISOString(),capacity,category,user.id);
+      db.prepare('INSERT INTO classes (id,title,kind,date,capacity,category,tutor_id,description) VALUES (?,?,?,?,?,?,?,?)').run(id,title.trim(),kind,new Date(date).toISOString(),capacity,category,user.id,description);
       return send(res,201,{id});
     }
     const session = typeof input.id === 'string' && db.prepare('SELECT * FROM classes WHERE id=?').get(input.id);
